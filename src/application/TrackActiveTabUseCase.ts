@@ -1,11 +1,7 @@
+import { ActiveTabInfo } from "src/domain/ActiveTabInfo";
 import { Clock } from "../domain/ports/Clock";
 import { TimeRepository } from "../domain/ports/TimeRepository";
 import { ActiveSession } from "../domain/Session";
-
-export interface ActiveTabInfo {
-  groupId: number | null;
-  groupTitle: string;
-}
 
 export class TrackActiveTabUseCase {
   private session: ActiveSession | null = null;
@@ -34,6 +30,12 @@ export class TrackActiveTabUseCase {
     const now = this.clock.now();
     await this.flush(now);
     this.session = null;
+  }
+
+  onGroupTitleChanged(groupId: number, newTitle: string) {
+    if (this.session && this.session.groupId === groupId) {
+      this.session.groupTitle = newTitle;
+    }
   }
 
   private async flush(endTime: number) {

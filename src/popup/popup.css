@@ -1,7 +1,49 @@
-body { font-family: system-ui, sans-serif; margin: 12px; }
-main { min-width: 280px; }
-h1 { font-size: 16px; margin: 0 0 8px; }
-#summary { display: grid; grid-template-columns: 1fr auto; gap: 6px 12px; align-items: center; }
-.group { font-weight: 600; }
-.small { color: #666; font-size: 12px; }
-button { margin-right: 8px; }
+/* popup.css */
+
+body {
+  font-family: Arial, sans-serif;
+  padding: 10px;
+  background: #f7f7f9;
+  color: #333;
+  width: 300px;
+}
+
+button {
+  margin: 5px 5px 10px 0;
+  padding: 5px 10px;
+  border: none;
+  border-radius: 6px;
+  background: #007bff;
+  color: white;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+button:hover {
+  background: #0056b3;
+}
+
+.entry-row {
+  margin-bottom: 12px;
+}
+
+.entry-label {
+  font-size: 13px;
+  margin-bottom: 4px;
+  font-weight: bold;
+  color: #444;
+}
+
+.bar-outer {
+  width: 100%;
+  height: 12px;
+  background: #e0e0e0;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.bar-inner {
+  height: 100%;
+  background: linear-gradient(90deg, #007bff, #00bfff);
+  transition: width 0.3s ease-in-out;
+}

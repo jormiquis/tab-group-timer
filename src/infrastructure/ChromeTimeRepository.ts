@@ -4,6 +4,7 @@ import { TimeRepository } from "../domain/ports/TimeRepository";
 const STORAGE_KEY = "timeEntries";
 
 export class ChromeTimeRepository implements TimeRepository {
+
   async save(entry: TimeEntry): Promise<void> {
     const all = await this.listAll();
     all.push(entry);
@@ -17,5 +18,16 @@ export class ChromeTimeRepository implements TimeRepository {
 
   async clearAll(): Promise<void> {
     await chrome.storage.local.set({ [STORAGE_KEY]: [] });
+  }
+
+  async updateGroupTitle(groupId: number, newTitle: string): Promise<void> {
+    const all = await this.listAll();
+    const updated = all.map(entry => {
+      if (entry.groupId === groupId) {
+        return { ...entry, groupTitle: newTitle };
+      }
+      return entry;
+    });
+    await chrome.storage.local.set({ [STORAGE_KEY]: updated });
   }
 }

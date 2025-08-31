@@ -7,7 +7,7 @@
     "noEmit": true,
     "baseUrl": ".",
     "paths": {},
-    "types": ["chrome-types"]
+    "types": ["chrome"]
   },
   "include": ["src/**/*"]
 }
