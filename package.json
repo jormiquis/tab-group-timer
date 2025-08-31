@@ -1,0 +1,18 @@
+{
+  "name": "tab-group-timer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "clean": "rm -rf dist && mkdir -p dist",
+    "build:bg": "esbuild src/background.ts --bundle --outfile=dist/background.js --platform=browser --target=chrome114",
+    "build:popup": "esbuild src/popup/popup.ts --bundle --outfile=dist/popup.js --platform=browser --target=chrome114",
+    "copy:popup": "cp src/popup/popup.html dist/popup.html && cp src/popup/popup.css dist/popup.css",
+    "build": "npm run clean && npm run build:bg && npm run build:popup && npm run copy:popup"
+  },
+  "devDependencies": {
+    "chrome-types": "^0.1.374",
+    "esbuild": "^0.23.0",
+    "typescript": "^5.6.2"
+  }
+}

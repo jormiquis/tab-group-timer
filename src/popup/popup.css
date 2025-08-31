@@ -1,0 +1,7 @@
+body { font-family: system-ui, sans-serif; margin: 12px; }
+main { min-width: 280px; }
+h1 { font-size: 16px; margin: 0 0 8px; }
+#summary { display: grid; grid-template-columns: 1fr auto; gap: 6px 12px; align-items: center; }
+.group { font-weight: 600; }
+.small { color: #666; font-size: 12px; }
+button { margin-right: 8px; }

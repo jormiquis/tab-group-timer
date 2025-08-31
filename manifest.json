@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "Tab Group Timer (v0)",
+  "version": "0.1.0",
+  "description": "Trackea el tiempo por grupo de pestañas (Tab Group).",
+  "permissions": ["tabs", "tabGroups", "storage"],
+  "background": {
+    "service_worker": "dist/background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Tab Group Timer",
+    "default_popup": "dist/popup.html"
+  },
+  "minimum_chrome_version": "114"
+}
