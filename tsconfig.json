@@ -5,6 +5,7 @@
     "moduleResolution": "Bundler",
     "strict": true,
     "noEmit": true,
+    "isolatedModules": true,
     "baseUrl": ".",
     "paths": {},
     "types": ["chrome"]
