@@ -32,10 +32,11 @@ export class TrackActiveTabUseCase {
     this.session = null;
   }
 
-  onGroupTitleChanged(groupId: number, newTitle: string) {
+  async onGroupTitleChanged(groupId: number, newTitle: string) {
     if (this.session && this.session.groupId === groupId) {
       this.session.groupTitle = newTitle;
     }
+    await this.repo.updateGroupTitle(groupId, newTitle);
   }
 
   private async flush(endTime: number) {
