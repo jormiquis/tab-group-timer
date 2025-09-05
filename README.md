@@ -31,7 +31,7 @@ Since this project is not yet published in the Chrome Web Store, you can try it 
 
 1. Clone this repository:
    ```bash
-   git clone https://github.com/<your-username>/tab-group-timer.git
+   git clone
    cd tab-group-timer
 
 2. Build the extension:
