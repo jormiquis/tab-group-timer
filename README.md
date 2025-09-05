@@ -5,6 +5,8 @@
 This is a **custom-built tool** I created to satisfy a personal need:
 tracking the tasks I dedicate my working hours to.
 
+My approach is 1 task == 1 group
+
 If it’s useful for me, chances are it might be useful for someone else too! 🚀
 
 This is an early **v0.1** release 🚧 — expect things to evolve quickly.
