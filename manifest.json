@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Tab Group Timer (v0)",
   "version": "0.1.0",
-  "description": "Trackea el tiempo por grupo de pestañas (Tab Group).",
+  "description": "Tracks time spent on a tab group",
   "permissions": ["tabs", "tabGroups", "storage", "idle"],
   "background": {
     "service_worker": "dist/background.js",
