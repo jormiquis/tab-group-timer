@@ -2,6 +2,12 @@
 
 import { TimeEntry } from "../domain/TimeEntry";
 
+interface GroupTimeViewModel {
+  title: string;
+  formattedTime: string;
+  percent: number;
+}
+
 type Totals = Record<string, number>;
 
 function fmt(ms: number): string {
@@ -28,36 +34,48 @@ function aggregate(entries: TimeEntry[]): Totals {
   }, {} as Totals);
 }
 
-function renderTotals(totals: Totals) {
+function createViewModels(totals: Totals): GroupTimeViewModel[] {
+  const sortedPairs = Object.entries(totals).sort((a, b) => b[1] - a[1]);
+  if (sortedPairs.length === 0) {
+    return [];
+  }
+
+  const totalMs = sortedPairs.reduce((sum, [, ms]) => sum + ms, 0);
+
+  return sortedPairs.map(([key, ms]) => {
+    const [, title] = key.split("|");
+    const percent = totalMs > 0 ? Math.round((ms / totalMs) * 100) : 0;
+    return {
+      title,
+      formattedTime: fmt(ms),
+      percent,
+    };
+  });
+}
+
+function render(viewModels: GroupTimeViewModel[]) {
   const root = document.getElementById("summary")!;
   root.innerHTML = "";
 
-  const pairs = Object.entries(totals).sort((a, b) => b[1] - a[1]);
-
-  if (pairs.length === 0) {
+  if (viewModels.length === 0) {
     root.textContent = "No data yet.";
     return;
   }
 
-  const totalMs = pairs.reduce((sum, [, ms]) => sum + ms, 0);
-
-  for (const [key, ms] of pairs) {
-    const [, title] = key.split("|");
-    const percent = Math.round((ms / totalMs) * 100);
-
+  for (const viewModel of viewModels) {
     const container = document.createElement("div");
     container.className = "entry-row";
 
     const label = document.createElement("div");
     label.className = "entry-label";
-    label.textContent = `${title} — ${fmt(ms)} (${percent}%)`;
+    label.textContent = `${viewModel.title} — ${viewModel.formattedTime} (${viewModel.percent}%)`;
 
     const barOuter = document.createElement("div");
     barOuter.className = "bar-outer";
 
     const barInner = document.createElement("div");
     barInner.className = "bar-inner";
-    barInner.style.width = `${percent}%`;
+    barInner.style.width = `${viewModel.percent}%`;
 
     barOuter.appendChild(barInner);
     container.appendChild(label);
@@ -70,7 +88,8 @@ function renderTotals(totals: Totals) {
 async function refresh() {
   const entries = await loadEntries();
   const totals = aggregate(entries);
-  renderTotals(totals);
+  const viewModels = createViewModels(totals);
+  render(viewModels);
 }
 
 document.getElementById("refresh")!.addEventListener("click", refresh);
