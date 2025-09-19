@@ -92,7 +92,6 @@ async function refresh() {
   render(viewModels);
 }
 
-document.getElementById("refresh")!.addEventListener("click", refresh);
 document.getElementById("clear")!.addEventListener("click", () => {
   chrome.runtime.sendMessage({ type: "CLEAR_ALL" }, refresh);
 });
