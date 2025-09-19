@@ -24,4 +24,10 @@ export class FakeTimeRepository implements TimeRepository {
       }
     });
   }
+
+   async deleteByGroupId(groupId: number): Promise<void> {
+    const newEntries = this.entries.filter(entry => entry.groupId !== groupId);
+
+    this.entries = newEntries;
+  }
 }

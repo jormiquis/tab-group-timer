@@ -28,6 +28,7 @@ describe("background.ts integration tests", () => {
         },
         tabGroups: {
             onUpdated: { addListener: vi.fn() },
+            onRemoved: { addListener: vi.fn() },
         },
         runtime: {
             onMessage: { addListener: vi.fn() },
@@ -36,13 +37,13 @@ describe("background.ts integration tests", () => {
     };
 
     beforeEach(async () => {
+        vi.resetModules(); // Asegura un entorno limpio para cada test
         vi.stubGlobal("chrome", mockChrome);
         await import("../src/background");
     });
 
     afterEach(() => {
         vi.clearAllMocks();
-        vi.resetModules();
     });
 
     describe("chrome.tabs.onActivated", () => {

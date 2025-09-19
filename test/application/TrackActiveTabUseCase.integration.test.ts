@@ -1,4 +1,4 @@
-// test/application/TrackActiveTabUseCase.unit.test.ts
+// test/application/TrackActiveTabUseCase.integration.test.ts
 import { describe, it, expect } from "vitest";
 import { TrackActiveTabUseCase } from "../../src/application/TrackActiveTabUseCase";
 import { FakeTimeRepository } from "../fakes/FakeTimeRepository";

@@ -78,6 +78,12 @@ chrome.tabGroups.onUpdated.addListener(async (group) => {
   safeSendTimeUpdated();
 });
 
+// Handle group removal to delete its data
+chrome.tabGroups.onRemoved.addListener(async (group) => {
+  await repository.deleteByGroupId(group.id);
+  safeSendTimeUpdated();
+});
+
 // --- Message Handling for Popup ---
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === "LIST_TIME_ENTRIES") {

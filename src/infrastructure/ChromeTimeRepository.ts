@@ -30,4 +30,10 @@ export class ChromeTimeRepository implements TimeRepository {
     });
     await chrome.storage.local.set({ [STORAGE_KEY]: updated });
   }
+
+  async deleteByGroupId(groupId: number): Promise<void> {
+    const all = await this.listAll();
+    const remaining = all.filter(entry => entry.groupId !== groupId);
+    await chrome.storage.local.set({ [STORAGE_KEY]: remaining });
+  }
 }
