@@ -1,5 +1,5 @@
 export interface ActiveSession {
-  groupId: number | null;
+  groupKey: string;
   groupTitle: string;
   startedAt: number;
 }

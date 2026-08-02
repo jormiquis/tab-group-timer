@@ -1,25 +1,39 @@
 /// <reference types="chrome" />
 import { ActiveTabInfo } from "../domain/ActiveTabInfo";
+import { groupIdentityOf } from "../domain/GroupIdentity";
+
+export interface ActiveTabSnapshot extends ActiveTabInfo {
+  /** Chrome's group id — usable for live lookups, never for storage identity. */
+  groupId: number | null;
+}
+
+const TAB_GROUP_ID_NONE = -1;
 
 export class ChromeAdapters {
-
-  static async getActiveTabInfo(): Promise<ActiveTabInfo | null> {
+  static async getActiveTabInfo(): Promise<ActiveTabSnapshot | null> {
     const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
     if (!tab || tab.id == null) return null;
 
-    const groupId = tab.groupId != null && tab.groupId !== -1 ? tab.groupId : null;
+    const groupId = tab.groupId != null && tab.groupId !== TAB_GROUP_ID_NONE ? tab.groupId : null;
 
-    let groupTitle = "No group";
-
+    let rawTitle: string | undefined;
     if (groupId !== null) {
       try {
-        const group = await chrome.tabGroups.get(groupId);
-        groupTitle = group.title || `Grupo ${groupId}`;
+        rawTitle = (await chrome.tabGroups.get(groupId)).title;
       } catch {
-        groupTitle = `Grupo ${groupId}`;
+        // Group vanished between the query and the lookup; treat it as untitled.
       }
     }
 
-    return { groupId, groupTitle };
+    return { groupId, ...groupIdentityOf(groupId, rawTitle) };
+  }
+
+  /** Every tab group currently open, across all windows. */
+  static async listTabGroups(): Promise<Array<{ id: number; title?: string }>> {
+    try {
+      return await chrome.tabGroups.query({});
+    } catch {
+      return [];
+    }
   }
 }

@@ -1,4 +1,4 @@
 export interface ActiveTabInfo {
-  groupId: number | null;
+  groupKey: string;
   groupTitle: string;
 }

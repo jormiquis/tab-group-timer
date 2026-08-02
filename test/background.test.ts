@@ -1,213 +1,208 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { groupKeyFromTitle } from "../src/domain/GroupIdentity";
+import { Snapshot } from "../src/shared/messages";
+import { createFakeChrome } from "./fakes/FakeChrome";
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { ChromeAdapters } from "../src/infrastructure/ChromeAdapters";
-import { TrackActiveTabUseCase } from "../src/application/TrackActiveTabUseCase";
-import { StopOnBlurUseCase } from "../src/application/StopOnBlurUseCase";
-import { ChromeTimeRepository } from "../src/infrastructure/ChromeTimeRepository";
+const MINUTE = 60_000;
+const START = new Date(2025, 2, 10, 9, 0, 0).getTime();
 
-// Mock dependencies
-vi.mock("src/infrastructure/ChromeAdapters");
-vi.mock("src/application/TrackActiveTabUseCase");
-vi.mock("src/application/StopOnBlurUseCase");
-vi.mock("src/infrastructure/ChromeTimeRepository");
-vi.mock("src/infrastructure/SystemClock");
+/**
+ * Drives the real background wiring against a fake Chrome, so these cover the
+ * event plumbing and the storage adapters together.
+ */
+describe("background", () => {
+  let fake: ReturnType<typeof createFakeChrome>;
 
+  async function boot() {
+    vi.resetModules();
+    fake.clearListeners();
+    vi.stubGlobal("chrome", fake.chrome);
+    const worker = await import("../src/background");
+    await worker.ready;
+  }
 
-describe("background.ts integration tests", () => {
-    const mockChrome = {
-        tabs: {
-            onActivated: { addListener: vi.fn() },
-            onUpdated: { addListener: vi.fn() },
-        },
-        windows: {
-            onFocusChanged: { addListener: vi.fn() },
-            WINDOW_ID_NONE: -1,
-        },
-        idle: {
-            onStateChanged: { addListener: vi.fn() },
-        },
-        tabGroups: {
-            onUpdated: { addListener: vi.fn() },
-            onRemoved: { addListener: vi.fn() },
-        },
-        runtime: {
-            onMessage: { addListener: vi.fn() },
-            sendMessage: vi.fn().mockResolvedValue(undefined),
-        },
-    };
+  function snapshot(): Promise<Snapshot> {
+    return fake.sendMessage<Snapshot>({ type: "GET_SNAPSHOT" });
+  }
 
-    beforeEach(async () => {
-        vi.resetModules(); // Asegura un entorno limpio para cada test
-        vi.stubGlobal("chrome", mockChrome);
-        await import("../src/background");
-    });
+  async function totalFor(title: string): Promise<number> {
+    const { entries } = await snapshot();
+    return entries
+      .filter((e) => e.groupKey === groupKeyFromTitle(title))
+      .reduce((sum, e) => sum + e.durationMs, 0);
+  }
 
-    afterEach(() => {
-        vi.clearAllMocks();
-    });
+  beforeEach(async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(START);
+    fake = createFakeChrome();
+    await boot();
+  });
 
-    describe("chrome.tabs.onActivated", () => {
-        it("should call tracker.onActiveTabChanged when an active tab is found", async () => {
-            const onActivatedListener = mockChrome.tabs.onActivated.addListener.mock.calls[0][0];
-            const activeTabInfo = {groupId: 1, groupTitle: "Test"};
-            vi.mocked(ChromeAdapters.getActiveTabInfo).mockResolvedValue(activeTabInfo);
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
 
-            await onActivatedListener();
+  it("registers the heartbeat alarm so the worker cannot silently die", async () => {
+    expect(fake.alarms.get("tab-group-timer:heartbeat")).toEqual({ periodInMinutes: 1 });
+  });
 
-            expect(ChromeAdapters.getActiveTabInfo).toHaveBeenCalled();
-            const trackerInstance = vi.mocked(TrackActiveTabUseCase).mock.instances[0];
-            expect(trackerInstance.onActiveTabChanged).toHaveBeenCalledWith(activeTabInfo);
-        });
+  it("tracks time across a group switch", async () => {
+    fake.setActiveGroup({ id: 1, title: "work" });
+    await fake.emit("tabs.onActivated");
 
-        it("should call tracker.onFocusLost when no active tab is found", async () => {
-            const onActivatedListener = mockChrome.tabs.onActivated.addListener.mock.calls[0][0];
-            vi.mocked(ChromeAdapters.getActiveTabInfo).mockResolvedValue(null);
+    vi.setSystemTime(START + 10 * MINUTE);
+    fake.setActiveGroup({ id: 2, title: "email" });
+    await fake.emit("tabs.onActivated");
 
-            await onActivatedListener();
+    expect(await totalFor("work")).toBe(10 * MINUTE);
+  });
 
-            expect(ChromeAdapters.getActiveTabInfo).toHaveBeenCalled();
-            const trackerInstance = vi.mocked(TrackActiveTabUseCase).mock.instances[0];
-            expect(trackerInstance.onFocusLost).toHaveBeenCalled();
-        });
-    });
+  it("keeps the session across a worker teardown", async () => {
+    fake.setActiveGroup({ id: 1, title: "deep work" });
+    await fake.emit("tabs.onActivated");
 
-    describe("chrome.windows.onFocusChanged", () => {
-        it("should call stopOnBlur.handleWindowFocusChanged and handleTabChange when focus returns", async () => {
-            const onFocusChangedListener = mockChrome.windows.onFocusChanged.addListener.mock.calls[0][0];
-            const windowId = 1;
-            const activeTabInfo = { groupId: 1, groupTitle: "Test" };
-            vi.mocked(ChromeAdapters.getActiveTabInfo).mockResolvedValue(activeTabInfo);
+    // Chrome kills the idle worker; a later event boots a fresh one.
+    vi.setSystemTime(START + 40 * MINUTE);
+    await boot();
+    await fake.emit("alarms.onAlarm", { name: "tab-group-timer:heartbeat" });
 
-            await onFocusChangedListener(windowId);
+    expect(await totalFor("deep work")).toBe(40 * MINUTE);
+  });
 
-            const stopOnBlurInstance = vi.mocked(StopOnBlurUseCase).mock.instances[0];
-            expect(stopOnBlurInstance.handleWindowFocusChanged).toHaveBeenCalledWith(windowId, -1);
+  it("checkpoints the running interval on every heartbeat", async () => {
+    fake.setActiveGroup({ id: 1, title: "work" });
+    await fake.emit("tabs.onActivated");
 
-            expect(ChromeAdapters.getActiveTabInfo).toHaveBeenCalled();
-            const trackerInstance = vi.mocked(TrackActiveTabUseCase).mock.instances[0];
-            expect(trackerInstance.onActiveTabChanged).toHaveBeenCalledWith(activeTabInfo);
-        });
+    vi.setSystemTime(START + MINUTE);
+    await fake.emit("alarms.onAlarm", { name: "tab-group-timer:heartbeat" });
 
-        it("should only call stopOnBlur when focus is lost", async () => {
-            const onFocusChangedListener = mockChrome.windows.onFocusChanged.addListener.mock.calls[0][0];
-            const windowId = -1;
+    expect(await totalFor("work")).toBe(MINUTE);
+  });
 
-            await onFocusChangedListener(windowId);
+  it("ignores alarms it did not schedule", async () => {
+    fake.setActiveGroup({ id: 1, title: "work" });
+    await fake.emit("tabs.onActivated");
 
-            const stopOnBlurInstance = vi.mocked(StopOnBlurUseCase).mock.instances[0];
-            expect(stopOnBlurInstance.handleWindowFocusChanged).toHaveBeenCalledWith(windowId, -1);
-            expect(ChromeAdapters.getActiveTabInfo).not.toHaveBeenCalled();
-        });
-    });
+    vi.setSystemTime(START + MINUTE);
+    await fake.emit("alarms.onAlarm", { name: "someone-elses-alarm" });
 
-    describe("chrome.tabs.onUpdated", () => {
-        it("should call handleTabChange when the active tab's group changes", async () => {
-            const onUpdatedListener = mockChrome.tabs.onUpdated.addListener.mock.calls[0][0];
-            const tab = { active: true };
-            const changeInfo = { groupId: 1 };
-            const activeTabInfo = { groupId: 1, groupTitle: "Test" };
-            vi.mocked(ChromeAdapters.getActiveTabInfo).mockResolvedValue(activeTabInfo);
+    expect(await totalFor("work")).toBe(0);
+  });
 
-            await onUpdatedListener(1, changeInfo, tab);
+  it("pauses while the machine is idle", async () => {
+    fake.setActiveGroup({ id: 1, title: "work" });
+    await fake.emit("tabs.onActivated");
 
-            expect(ChromeAdapters.getActiveTabInfo).toHaveBeenCalled();
-            const trackerInstance = vi.mocked(TrackActiveTabUseCase).mock.instances[0];
-            expect(trackerInstance.onActiveTabChanged).toHaveBeenCalledWith(activeTabInfo);
-        });
+    vi.setSystemTime(START + 5 * MINUTE);
+    await fake.emit("idle.onStateChanged", "idle");
 
-        it("should not call handleTabChange if the tab is not active", async () => {
-            const onUpdatedListener = mockChrome.tabs.onUpdated.addListener.mock.calls[0][0];
-            const tab = { active: false };
-            const changeInfo = { groupId: 1 };
-            vi.mocked(ChromeAdapters.getActiveTabInfo);
+    vi.setSystemTime(START + 60 * MINUTE);
+    await fake.emit("alarms.onAlarm", { name: "tab-group-timer:heartbeat" });
 
-            await onUpdatedListener(1, changeInfo, tab);
+    expect(await totalFor("work")).toBe(5 * MINUTE);
+  });
 
-            expect(ChromeAdapters.getActiveTabInfo).not.toHaveBeenCalled();
-        });
+  it("pauses when Chrome loses window focus and resumes when it returns", async () => {
+    fake.setActiveGroup({ id: 1, title: "work" });
+    await fake.emit("tabs.onActivated");
 
-        it("should not call handleTabChange if groupId has not changed", async () => {
-            const onUpdatedListener = mockChrome.tabs.onUpdated.addListener.mock.calls[0][0];
-            const tab = { active: true };
-            const changeInfo = { status: "complete" }; // No groupId change
-            vi.mocked(ChromeAdapters.getActiveTabInfo);
+    vi.setSystemTime(START + 2 * MINUTE);
+    await fake.emit("windows.onFocusChanged", -1);
 
-            await onUpdatedListener(1, changeInfo, tab);
+    vi.setSystemTime(START + 30 * MINUTE);
+    await fake.emit("windows.onFocusChanged", 1);
 
-            expect(ChromeAdapters.getActiveTabInfo).not.toHaveBeenCalled();
-        });
-    });
+    vi.setSystemTime(START + 33 * MINUTE);
+    await fake.emit("idle.onStateChanged", "locked");
 
-    describe("chrome.idle.onStateChanged", () => {
-        it("should call handleTabChange when state is active", async () => {
-            const onStateChangedListener = mockChrome.idle.onStateChanged.addListener.mock.calls[0][0];
-            const activeTabInfo = { groupId: 1, groupTitle: "Test"};
-            vi.mocked(ChromeAdapters.getActiveTabInfo).mockResolvedValue(activeTabInfo);
+    expect(await totalFor("work")).toBe(5 * MINUTE);
+  });
 
-            await onStateChangedListener("active");
+  it("moves recorded time onto the new name when a group is renamed", async () => {
+    fake.setActiveGroup({ id: 1, title: "old name" });
+    await fake.emit("tabs.onActivated");
 
-            expect(ChromeAdapters.getActiveTabInfo).toHaveBeenCalled();
-            const trackerInstance = vi.mocked(TrackActiveTabUseCase).mock.instances[0];
-            expect(trackerInstance.onActiveTabChanged).toHaveBeenCalledWith(activeTabInfo);
-        });
+    vi.setSystemTime(START + 5 * MINUTE);
+    await fake.emit("tabGroups.onUpdated", fake.renameGroup(1, "new name"));
 
-        it("should call tracker.onFocusLost when state is not active", async () => {
-            const onStateChangedListener = mockChrome.idle.onStateChanged.addListener.mock.calls[0][0];
+    vi.setSystemTime(START + 8 * MINUTE);
+    await fake.emit("idle.onStateChanged", "idle");
 
-            await onStateChangedListener("idle");
+    expect(await totalFor("old name")).toBe(0);
+    expect(await totalFor("new name")).toBe(8 * MINUTE);
+  });
 
-            const trackerInstance = vi.mocked(TrackActiveTabUseCase).mock.instances[0];
-            expect(trackerInstance.onFocusLost).toHaveBeenCalled();
-        });
-    });
+  it("keeps a group's history after the group is closed", async () => {
+    fake.setActiveGroup({ id: 1, title: "finished task" });
+    await fake.emit("tabs.onActivated");
 
-    describe("chrome.tabGroups.onUpdated", () => {
-        it("should update group title in repository and tracker", async () => {
-            const onUpdatedListener = mockChrome.tabGroups.onUpdated.addListener.mock.calls[0][0];
-            const group = { id: 1, title: "New Title" };
+    vi.setSystemTime(START + 25 * MINUTE);
+    await fake.emit("idle.onStateChanged", "idle");
+    await fake.emit("tabGroups.onRemoved", { id: 1 });
 
-            await onUpdatedListener(group);
+    expect(await totalFor("finished task")).toBe(25 * MINUTE);
+  });
 
-            const repositoryInstance = vi.mocked(ChromeTimeRepository).mock.instances[0];
-            expect(repositoryInstance.updateGroupTitle).toHaveBeenCalledWith(1, "New Title");
+  it("reports the running interval so the popup can show live time", async () => {
+    fake.setActiveGroup({ id: 1, title: "work" });
+    await fake.emit("tabs.onActivated");
+    vi.setSystemTime(START + 42_000);
 
-            const trackerInstance = vi.mocked(TrackActiveTabUseCase).mock.instances[0];
-            expect(trackerInstance.onGroupTitleChanged).toHaveBeenCalledWith(1, "New Title");
-        });
-    });
+    const { active, now } = await snapshot();
 
-    describe("chrome.runtime.onMessage", () => {
-        it("should handle LIST_TIME_ENTRIES message", async () => {
-            const onMessageListener = mockChrome.runtime.onMessage.addListener.mock.calls[0][0];
-            const sendResponse = vi.fn();
-            const repositoryInstance = vi.mocked(ChromeTimeRepository).mock.instances[0];
-            const entries = [{ id: 1, name: "Test Entry" }];
-            vi.mocked(repositoryInstance.listAll).mockResolvedValue(entries as any);
+    expect(active).toMatchObject({ groupKey: groupKeyFromTitle("work"), startedAt: START });
+    expect(now).toBe(START + 42_000);
+  });
 
-            const result = onMessageListener({ type: "LIST_TIME_ENTRIES" }, {}, sendResponse);
-            expect(result).toBe(true);
+  it("erases everything on reset without stopping the tracker", async () => {
+    fake.setActiveGroup({ id: 1, title: "work" });
+    await fake.emit("tabs.onActivated");
+    vi.setSystemTime(START + 10 * MINUTE);
 
-            // Wait for the promise to resolve
-            await new Promise(resolve => setTimeout(resolve, 0));
+    const after = await fake.sendMessage<Snapshot>({ type: "CLEAR_ALL" });
 
-            expect(repositoryInstance.listAll).toHaveBeenCalled();
-            expect(sendResponse).toHaveBeenCalledWith({ entries });
-        });
+    expect(after.entries).toEqual([]);
+    // Still tracking, but the erased interval does not come back.
+    expect(after.active).toMatchObject({ startedAt: START + 10 * MINUTE });
+  });
 
-        it("should handle CLEAR_ALL message", async () => {
-            const onMessageListener = mockChrome.runtime.onMessage.addListener.mock.calls[0][0];
-            const sendResponse = vi.fn();
-            const repositoryInstance = vi.mocked(ChromeTimeRepository).mock.instances[0];
-            vi.mocked(repositoryInstance.clearAll).mockResolvedValue(undefined);
+  it("deletes a single group on request", async () => {
+    fake.setActiveGroup({ id: 1, title: "work" });
+    await fake.emit("tabs.onActivated");
+    vi.setSystemTime(START + 5 * MINUTE);
+    fake.setActiveGroup({ id: 2, title: "email" });
+    await fake.emit("tabs.onActivated");
+    vi.setSystemTime(START + 8 * MINUTE);
+    await fake.emit("idle.onStateChanged", "idle");
 
-            const result = onMessageListener({ type: "CLEAR_ALL" }, {}, sendResponse);
-            expect(result).toBe(true);
+    await fake.sendMessage({ type: "DELETE_GROUP", groupKey: groupKeyFromTitle("work") });
 
-            // Wait for the promise to resolve
-            await new Promise(resolve => setTimeout(resolve, 0));
+    expect(await totalFor("work")).toBe(0);
+    expect(await totalFor("email")).toBe(3 * MINUTE);
+  });
 
-            expect(repositoryInstance.clearAll).toHaveBeenCalled();
-            expect(sendResponse).toHaveBeenCalledWith({});
-        });
-    });
+  it("stops tracking when there is no active tab", async () => {
+    fake.setActiveGroup({ id: 1, title: "work" });
+    await fake.emit("tabs.onActivated");
+
+    vi.setSystemTime(START + 3 * MINUTE);
+    fake.setNoActiveTab();
+    await fake.emit("tabs.onActivated");
+
+    expect((await snapshot()).active).toBeNull();
+    expect(await totalFor("work")).toBe(3 * MINUTE);
+  });
+
+  it("only reacts to tab updates that change the active tab's group", async () => {
+    fake.setActiveGroup({ id: 1, title: "work" });
+    await fake.emit("tabs.onActivated");
+    vi.setSystemTime(START + MINUTE);
+
+    await fake.emit("tabs.onUpdated", 1, { status: "complete" }, { active: true });
+    await fake.emit("tabs.onUpdated", 2, { groupId: 3 }, { active: false });
+
+    expect(fake.chrome.tabs.query).toHaveBeenCalledTimes(1);
+  });
 });

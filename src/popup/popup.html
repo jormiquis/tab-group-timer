@@ -1,5 +1,5 @@
 <!doctype html>
-<html>
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -7,11 +7,33 @@
     <link rel="stylesheet" href="popup.css" />
   </head>
   <body>
-    <main>
+    <header>
       <h1>Tab Group Timer</h1>
-      <div id="summary"></div>
-      <button id="clear">Reset</button>
-    </main>
+      <div class="ranges" id="ranges" role="tablist" aria-label="Time range">
+        <button type="button" class="range" role="tab" data-range="today">Today</button>
+        <button type="button" class="range" role="tab" data-range="week">7 days</button>
+        <button type="button" class="range" role="tab" data-range="all">All time</button>
+      </div>
+    </header>
+
+    <p class="total" id="total"></p>
+
+    <main id="summary" aria-live="polite"></main>
+
+    <div class="confirm" id="confirm" hidden>
+      <p>Erase all tracked time? This cannot be undone.</p>
+      <div class="confirm-actions">
+        <button type="button" id="confirm-cancel">Cancel</button>
+        <button type="button" class="danger" id="confirm-erase">Erase everything</button>
+      </div>
+    </div>
+
+    <footer>
+      <button type="button" id="export-csv">Export CSV</button>
+      <button type="button" id="export-json">Export JSON</button>
+      <button type="button" class="danger" id="reset">Reset</button>
+    </footer>
+
     <script type="module" src="popup.js"></script>
   </body>
 </html>

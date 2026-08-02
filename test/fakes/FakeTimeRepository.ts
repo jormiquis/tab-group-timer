@@ -1,33 +1,47 @@
-// test/fakes/FakeTimeRepository.ts
+import { TimeEntry, bucketKey } from "../../src/domain/TimeEntry";
 import { TimeRepository } from "../../src/domain/ports/TimeRepository";
-import { TimeEntry } from "../../src/domain/TimeEntry";
 
+/** Mirrors ChromeTimeRepository's day/group bucketing, without Chrome. */
 export class FakeTimeRepository implements TimeRepository {
-  entries: TimeEntry[] = [];
+  buckets = new Map<string, TimeEntry>();
 
   async save(entry: TimeEntry): Promise<void> {
-    this.entries.push(entry);
+    const key = bucketKey(entry.date, entry.groupKey);
+    const existing = this.buckets.get(key);
+
+    this.buckets.set(
+      key,
+      existing
+        ? {
+            ...existing,
+            groupTitle: entry.groupTitle,
+            startedAt: Math.min(existing.startedAt, entry.startedAt),
+            endedAt: Math.max(existing.endedAt, entry.endedAt),
+            durationMs: existing.durationMs + entry.durationMs,
+          }
+        : { ...entry },
+    );
   }
 
   async listAll(): Promise<TimeEntry[]> {
-    return this.entries;
+    return [...this.buckets.values()];
   }
 
   async clearAll(): Promise<void> {
-    this.entries = [];
+    this.buckets.clear();
   }
 
-  async updateGroupTitle(id: number, title: string): Promise<void> {
-    this.entries.forEach(entry => {
-      if (entry.groupId === id) {
-        entry.groupTitle = title;
-      }
-    });
+  async renameGroup(fromKey: string, toKey: string, newTitle: string): Promise<void> {
+    for (const [key, entry] of [...this.buckets]) {
+      if (entry.groupKey !== fromKey) continue;
+      this.buckets.delete(key);
+      await this.save({ ...entry, groupKey: toKey, groupTitle: newTitle });
+    }
   }
 
-   async deleteByGroupId(groupId: number): Promise<void> {
-    const newEntries = this.entries.filter(entry => entry.groupId !== groupId);
-
-    this.entries = newEntries;
+  async deleteByGroupKey(groupKey: string): Promise<void> {
+    for (const [key, entry] of [...this.buckets]) {
+      if (entry.groupKey === groupKey) this.buckets.delete(key);
+    }
   }
 }

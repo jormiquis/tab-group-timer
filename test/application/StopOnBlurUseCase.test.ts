@@ -1,26 +1,25 @@
-// test/application/StopOnBlurUseCase.unit.test.ts
-import { describe, it, expect, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { StopOnBlurUseCase } from "../../src/application/StopOnBlurUseCase";
+import { TrackActiveTabUseCase } from "../../src/application/TrackActiveTabUseCase";
+
+function trackerSpy() {
+  return { onFocusLost: vi.fn(), onActiveTabChanged: vi.fn() } as unknown as TrackActiveTabUseCase;
+}
 
 describe("StopOnBlurUseCase", () => {
-  it("calls onFocusLost when focus is lost", async () => {
-    const tracker = { onFocusLost: vi.fn(), onActiveTabChanged: vi.fn() };
-    const useCase = new StopOnBlurUseCase(tracker as any);
+  it("stops tracking when no window holds focus", async () => {
+    const tracker = trackerSpy();
 
-    await useCase.handleWindowFocusChanged(-1, -1);
+    await new StopOnBlurUseCase(tracker).handleWindowFocusChanged(-1, -1);
 
     expect(tracker.onFocusLost).toHaveBeenCalled();
-    expect(tracker.onActiveTabChanged).not.toHaveBeenCalled();
   });
 
-  it("calls onActiveTabChanged when retakes focus", async () => {
-    const tracker = { onFocusLost: vi.fn(), onActiveTabChanged: vi.fn() };
-    const useCase = new StopOnBlurUseCase(tracker as any);
+  it("leaves the session alone when focus moves between windows", async () => {
+    const tracker = trackerSpy();
 
-    const activeTabInfo = { groupId: 1, groupTitle: "Test" };
-    await useCase.handleWindowFocusChanged(1, -1);
-    await tracker.onActiveTabChanged(activeTabInfo);
+    await new StopOnBlurUseCase(tracker).handleWindowFocusChanged(2, -1);
 
-    expect(tracker.onActiveTabChanged).toHaveBeenCalledWith(activeTabInfo);
+    expect(tracker.onFocusLost).not.toHaveBeenCalled();
   });
 });

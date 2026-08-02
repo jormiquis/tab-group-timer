@@ -1,105 +1,196 @@
-// popup.ts
+import { localDate } from "../domain/LocalDate";
+import { Request, Snapshot, TIME_UPDATED } from "../shared/messages";
+import {
+  GroupSummary,
+  Range,
+  formatCompact,
+  formatDuration,
+  isWithinRange,
+  summarize,
+  toCsv,
+} from "./summary";
 
-import { TimeEntry } from "../domain/TimeEntry";
+const RANGE_LABELS: Record<Range, string> = {
+  today: "today",
+  week: "in the last 7 days",
+  all: "all time",
+};
 
-interface GroupTimeViewModel {
-  title: string;
-  formattedTime: string;
-  percent: number;
-}
+const el = {
+  ranges: document.getElementById("ranges")!,
+  total: document.getElementById("total")!,
+  summary: document.getElementById("summary")!,
+  confirm: document.getElementById("confirm") as HTMLDivElement,
+  confirmCancel: document.getElementById("confirm-cancel")!,
+  confirmErase: document.getElementById("confirm-erase")!,
+  reset: document.getElementById("reset")!,
+  exportCsv: document.getElementById("export-csv")!,
+  exportJson: document.getElementById("export-json")!,
+};
 
-type Totals = Record<string, number>;
+let range: Range = "today";
+let snapshot: Snapshot = { entries: [], active: null, now: Date.now() };
+/** Difference between the background clock and ours, so live time stays honest. */
+let clockSkew = 0;
 
-function fmt(ms: number): string {
-  const s = Math.floor(ms / 1000);
-  const h = Math.floor(s / 3600).toString().padStart(2, "0");
-  const m = Math.floor((s % 3600) / 60).toString().padStart(2, "0");
-  const ss = Math.floor(s % 60).toString().padStart(2, "0");
-  return `${h}:${m}:${ss}`;
-}
-
-async function loadEntries(): Promise<TimeEntry[]> {
+function send(request: Request): Promise<Snapshot> {
   return new Promise((resolve) => {
-    chrome.runtime.sendMessage({ type: "LIST_TIME_ENTRIES" }, (res) => {
-      resolve((res?.entries as TimeEntry[]) ?? []);
+    chrome.runtime.sendMessage(request, (response?: Snapshot) => {
+      // A missing response means the worker was mid-restart; keep what we have.
+      resolve(response ?? snapshot);
     });
   });
 }
 
-function aggregate(entries: TimeEntry[]): Totals {
-  return entries.reduce((acc, e) => {
-    const key = `${e.groupId}|${e.groupTitle}`;
-    acc[key] = (acc[key] ?? 0) + e.durationMs;
-    return acc;
-  }, {} as Totals);
+function now(): number {
+  return Date.now() + clockSkew;
 }
 
-function createViewModels(totals: Totals): GroupTimeViewModel[] {
-  const sortedPairs = Object.entries(totals).sort((a, b) => b[1] - a[1]);
-  if (sortedPairs.length === 0) {
-    return [];
+async function load(request: Request = { type: "GET_SNAPSHOT" }): Promise<void> {
+  const response = await send(request);
+  clockSkew = response.now - Date.now();
+  snapshot = response;
+  render();
+}
+
+function render(): void {
+  const { rows, totalMs } = summarize(snapshot.entries, snapshot.active, now(), range);
+
+  for (const button of el.ranges.querySelectorAll<HTMLButtonElement>(".range")) {
+    button.setAttribute("aria-selected", String(button.dataset.range === range));
   }
 
-  const totalMs = sortedPairs.reduce((sum, [, ms]) => sum + ms, 0);
+  el.total.replaceChildren(
+    strong(formatCompact(totalMs)),
+    document.createTextNode(` tracked ${RANGE_LABELS[range]}`),
+  );
 
-  return sortedPairs.map(([key, ms]) => {
-    const [, title] = key.split("|");
-    const percent = totalMs > 0 ? Math.round((ms / totalMs) * 100) : 0;
-    return {
-      title,
-      formattedTime: fmt(ms),
-      percent,
-    };
+  el.summary.replaceChildren(
+    ...(rows.length === 0 ? [emptyState()] : rows.map(renderRow)),
+  );
+}
+
+function emptyState(): HTMLElement {
+  const p = document.createElement("p");
+  p.className = "empty";
+  p.textContent =
+    range === "all"
+      ? "No time tracked yet. Open a tab group and start working."
+      : `Nothing tracked ${RANGE_LABELS[range]}.`;
+  return p;
+}
+
+function renderRow(row: GroupSummary): HTMLElement {
+  const container = document.createElement("div");
+  container.className = "entry-row";
+
+  const head = document.createElement("div");
+  head.className = "entry-head";
+
+  if (row.isActive) {
+    const dot = document.createElement("span");
+    dot.className = "dot";
+    dot.title = "Currently tracking";
+    head.appendChild(dot);
+  }
+
+  const title = document.createElement("span");
+  title.className = "entry-title";
+  title.textContent = row.groupTitle;
+  title.title = row.groupTitle;
+
+  const time = document.createElement("span");
+  time.className = "entry-time";
+  time.textContent = formatDuration(row.durationMs);
+
+  const percent = document.createElement("span");
+  percent.className = "entry-percent";
+  percent.textContent = `${row.percent}%`;
+
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.className = "entry-delete";
+  remove.textContent = "×";
+  remove.title = `Delete "${row.groupTitle}"`;
+  remove.setAttribute("aria-label", `Delete ${row.groupTitle}`);
+  remove.addEventListener("click", () => {
+    void load({ type: "DELETE_GROUP", groupKey: row.groupKey });
   });
+
+  head.append(title, time, percent, remove);
+
+  const barOuter = document.createElement("div");
+  barOuter.className = "bar-outer";
+  const barInner = document.createElement("div");
+  barInner.className = "bar-inner";
+  barInner.style.width = `${row.percent}%`;
+  barOuter.appendChild(barInner);
+
+  container.append(head, barOuter);
+  return container;
 }
 
-function render(viewModels: GroupTimeViewModel[]) {
-  const root = document.getElementById("summary")!;
-  root.innerHTML = "";
-
-  if (viewModels.length === 0) {
-    root.textContent = "No data yet.";
-    return;
-  }
-
-  for (const viewModel of viewModels) {
-    const container = document.createElement("div");
-    container.className = "entry-row";
-
-    const label = document.createElement("div");
-    label.className = "entry-label";
-    label.textContent = `${viewModel.title} — ${viewModel.formattedTime} (${viewModel.percent}%)`;
-
-    const barOuter = document.createElement("div");
-    barOuter.className = "bar-outer";
-
-    const barInner = document.createElement("div");
-    barInner.className = "bar-inner";
-    barInner.style.width = `${viewModel.percent}%`;
-
-    barOuter.appendChild(barInner);
-    container.appendChild(label);
-    container.appendChild(barOuter);
-
-    root.appendChild(container);
-  }
+function strong(text: string): HTMLElement {
+  const node = document.createElement("strong");
+  node.textContent = text;
+  return node;
 }
 
-async function refresh() {
-  const entries = await loadEntries();
-  const totals = aggregate(entries);
-  const viewModels = createViewModels(totals);
-  render(viewModels);
+function download(filename: string, mime: string, content: string): void {
+  const url = URL.createObjectURL(new Blob([content], { type: mime }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  // Revoked on a delay so the download has time to start.
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }
 
-document.getElementById("clear")!.addEventListener("click", () => {
-  chrome.runtime.sendMessage({ type: "CLEAR_ALL" }, refresh);
+/** Exports what the current range shows, not the whole history. */
+function entriesInRange() {
+  return snapshot.entries.filter((entry) => isWithinRange(entry.date, range, now()));
+}
+
+// --- Events ---
+
+el.ranges.addEventListener("click", (event) => {
+  const button = (event.target as HTMLElement).closest<HTMLButtonElement>(".range");
+  if (!button?.dataset.range) return;
+  range = button.dataset.range as Range;
+  render();
 });
 
-chrome.runtime.onMessage.addListener((msg) => {
-  if (msg?.type === "TIME_UPDATED") {
-    refresh();
-  }
+el.reset.addEventListener("click", () => {
+  el.confirm.hidden = false;
+  (el.confirmCancel as HTMLButtonElement).focus();
 });
 
-refresh();
+el.confirmCancel.addEventListener("click", () => {
+  el.confirm.hidden = true;
+});
+
+el.confirmErase.addEventListener("click", async () => {
+  el.confirm.hidden = true;
+  await load({ type: "CLEAR_ALL" });
+});
+
+el.exportCsv.addEventListener("click", () => {
+  download(`tab-group-timer-${localDate(now())}.csv`, "text/csv", toCsv(entriesInRange()));
+});
+
+el.exportJson.addEventListener("click", () => {
+  download(
+    `tab-group-timer-${localDate(now())}.json`,
+    "application/json",
+    JSON.stringify(entriesInRange(), null, 2),
+  );
+});
+
+chrome.runtime.onMessage.addListener((message) => {
+  if (message?.type === TIME_UPDATED) void load();
+});
+
+// Redraw once a second so the tracked group's timer counts up live.
+setInterval(render, 1000);
+
+void load();
