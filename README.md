@@ -1,3 +1,5 @@
+[![Chrome Web Store](https://img.shields.io/chrome-web-store/v/eimpchnijdnpkncfbijnfdkcahdncppg?label=Chrome%20Web%20Store&logo=googlechrome&logoColor=white)](https://chromewebstore.google.com/detail/eimpchnijdnpkncfbijnfdkcahdncppg)
+
 # ⏱️ Tab Group Timer
 
 Where did my working hours actually go?
